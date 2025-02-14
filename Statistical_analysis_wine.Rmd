@@ -1,0 +1,1234 @@
+---
+output:
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+  - \usepackage{fontspec}
+  - \usepackage{unicode-math}
+---
+
+
+```{r}
+# Loading Packages
+library(tidyverse)
+library(readxl)
+library(ggthemes)
+library(skimr)
+library(corrplot)
+library(caret)
+library(car)
+library(FSA)
+library(RVAideMemoire)
+```
+
+```{r}
+# Importing the data set
+red_wine <- read_excel("winequality-red.xlsx")
+white_wine <- read_excel("winequality-white.xlsx")
+```
+
+
+```{r}
+# Viewing the first 10 rows of the red wine data frame.
+head(red_wine,10)
+```
+```{r}
+# Viewing the first 10 rows of the white wine data frame.
+head(white_wine,10)
+```
+```{r}
+# Structure of both data frames.
+str(red_wine)
+str(white_wine)
+```
+
+```{r}
+# checking for missing values
+sum(is.na(red_wine))
+sum(is.na(white_wine))
+```
+
+
+```{r}
+# Checking for duplicates
+sum(duplicated(red_wine))
+sum(duplicated(white_wine)) 
+```
+```{r}
+# Removing duplicates
+red_wine <- red_wine[!duplicated(red_wine), ]
+white_wine <- white_wine[!duplicated(white_wine), ]
+```
+
+```{r}
+# Structure of both data frames.
+str(red_wine)
+str(white_wine)
+```
+
+
+They both have the same column names and column length.
+```{r}
+# Merging the data frames for easier analysis
+red_wine <- mutate(red_wine, wine_type = as.factor("Red"))
+white_wine <- mutate(white_wine, wine_type = as.factor("White"))
+wine_data <- bind_rows(red_wine, white_wine)
+```
+
+```{r}
+#converting quality to ordinal categorical
+wine_data$quality <- factor(wine_data$quality, ordered = TRUE)
+```
+
+
+```{r}
+#Checking the head and tail of the newly merged dataframe
+head(wine_data,5)
+tail(wine_data,5)
+```
+```{r}
+# checking the structure of the wine_data data frame
+str(wine_data)
+```
+The red wine had 1359 rows and 12 columns
+The white wine had 3961 rows and 12 columns
+The new data frame (wine_data) has 5320 row and 13 columns.
+The quality column is now a categorical variable with 7 levels from 3-9
+The last column represents the wine type, red or white.
+
+```{r}
+# Summary statistics
+summary(wine_data)
+```
+From the summary statistics:
+There are 30 observations with a rating of 3
+There are 206 observations with a rating of 4
+There are 1752 observations with a rating of 5
+There are 2323 observations with a rating of 6
+There are 856 observations with a rating of 7
+There are 148 observations with a rating of 8
+There are 5 observations with a rating of 9
+
+```{r}
+# Veiwing the summary statistics (mean and median) based on wine type
+summary_stats <- wine_data %>%
+  group_by(wine_type) %>%
+  summarise(across(where(is.numeric), list(
+    mean = mean,
+    median = median
+  ), .names = "{.col}_{.fn}"))
+print(summary_stats)
+```
+
+
+```{r}
+# summary statistics using the skim function
+wine_data %>%
+  group_by(wine_type) %>%
+  skim()
+```
+
+```{r}
+# Percentage distribution of quality based on the wine types
+quality_percentage <- wine_data %>%
+  group_by(wine_type, quality) %>%
+  summarize(count = n(), .groups = "drop") %>% 
+  group_by(wine_type) %>% 
+  mutate(percentage = count / sum(count) * 100)
+quality_percentage
+```
+
+```{r}
+# Plotting the percentage distribution
+ggplot(quality_percentage, aes(x = quality, y = percentage, fill = wine_type)) +
+  geom_col(position = "dodge") +
+  labs(title = "Percentage Distribution of Wine Quality by Type") +
+  scale_fill_manual(values = c("Red" = "red", "White" = "lightblue")) +  theme_calc()
+```
+
+```{r}
+# creating a function to plot box plot by wine type
+plot_boxplot <- function(data, column_name) {
+  ggplot(data, aes(x = wine_type, y = .data[[column_name]], fill = wine_type)) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name, "by Wine Type")) +
+    scale_fill_manual(values = c("Red" = "red", "White" = "lightblue")) +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+}
+```
+
+```{r}
+# creating a function to plot box plot by quality and wine type
+plot_boxplot_quality <- function(data, column_name) {
+  ggplot(data, aes(x = quality, y = .data[[column_name]], fill = wine_type)) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name, "by quality and Wine Type")) +
+    scale_fill_manual(values = c("Red" = "red", "White" = "lightblue")) +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+}
+```
+
+
+```{r}
+# creating a function to plot density plot
+plot_density_plot <- function(data, column_name) {
+  ggplot(data, aes(x = .data[[column_name]], fill = wine_type)) +
+    geom_density(alpha = 0.7) +
+    labs(title = paste("Density plot of", column_name, "by Wine Type")) +
+    scale_fill_manual(values = c("Red" = "red", "White" = "lightblue")) +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+}
+```
+
+```{r}
+# Function to perform normality test.
+# Creating a function to plot QQ plot and perform Shapiro-Wilks test
+normality_tester <- function(data, column_name, color, wine_type) {
+  column_data <- data[[column_name]]
+  
+  # QQ plot
+  qqplot <- ggplot(data, aes(sample = column_data)) +
+    stat_qq(color = color) +
+    stat_qq_line(color = "black") +
+    labs(
+      title = paste("QQ Plot for", column_name, "(", wine_type, ")"),
+      x = "Theoretical",
+      y = "Sample"
+    ) +
+    theme_calc()+ 
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+  print(qqplot)  
+  
+  #Shapiro-Wilks test
+  shapiro_result <- shapiro.test(column_data)
+  return(shapiro_result)
+}
+```
+
+```{r}
+#fixed acidity
+plot_density_plot(wine_data, 'fixed acidity')
+plot_boxplot(wine_data, 'fixed acidity')
+plot_boxplot_quality(wine_data, 'fixed acidity')
+```
+```{r}
+#performing normality check for red wine (fixed acidity)
+normality_tester(red_wine, 'fixed acidity', 'red','Red Wine')
+
+#performing normality check for white wine (fixed acidity)
+normality_tester(white_wine, 'fixed acidity', 'lightblue', "White Wine")
+```
+From the normality rest, the P value is less than 0.05, therefore it doesn't follow a normal distribution
+
+
+```{r}
+# volatile acidity
+plot_density_plot(wine_data, 'volatile acidity')
+plot_boxplot(wine_data, 'volatile acidity')
+plot_boxplot_quality(wine_data, 'volatile acidity')
+```
+
+```{r}
+#performing normality check for red wine (volatile acidity)
+normality_tester(red_wine, 'volatile acidity', 'red','Red Wine')
+
+#performing normality check for white wine (volatile acidity)
+normality_tester(white_wine, 'volatile acidity', 'lightblue', "White Wine")
+```
+
+```{r}
+# citric acid
+plot_density_plot(wine_data, 'citric acid')
+plot_boxplot(wine_data, 'citric acid')
+plot_boxplot_quality(wine_data, 'citric acid')
+```
+
+```{r}
+#performing normality check for red wine (citric acid)
+normality_tester(red_wine, 'citric acid', 'red','Red Wine')
+
+#performing normality check for white wine (citric acid)
+normality_tester(white_wine, 'citric acid', 'lightblue', "White Wine")
+```
+
+
+```{r}
+# residual sugar
+plot_density_plot(wine_data, 'residual sugar')
+plot_boxplot(wine_data, 'residual sugar')
+plot_boxplot_quality(wine_data, 'residual sugar')
+```
+
+```{r}
+#performing normality check for red wine (residual sugar)
+normality_tester(red_wine, 'residual sugar', 'red','Red Wine')
+
+#performing normality check for white wine (residual sugar)
+normality_tester(white_wine, 'residual sugar', 'lightblue', "White Wine")
+```
+
+```{r}
+# chlorides
+plot_density_plot(wine_data, 'chlorides')
+plot_boxplot(wine_data, 'chlorides')
+plot_boxplot_quality(wine_data, 'chlorides')
+```
+
+```{r}
+#performing normality check for red wine (chlorides)
+normality_tester(red_wine, 'chlorides', 'red','Red Wine')
+
+#performing normality check for white wine (chlorides)
+normality_tester(white_wine, 'chlorides', 'lightblue', "White Wine")
+```
+
+
+```{r}
+# free sulfur dioxide
+plot_density_plot(wine_data, 'free sulfur dioxide')
+plot_boxplot(wine_data, 'free sulfur dioxide')
+plot_boxplot_quality(wine_data, 'free sulfur dioxide')
+```
+
+```{r}
+#performing normality check for red wine (free sulfur dioxide)
+normality_tester(red_wine, 'free sulfur dioxide', 'red','Red Wine')
+
+#performing normality check for white wine (free sulfur dioxide)
+normality_tester(white_wine, 'free sulfur dioxide', 'lightblue', "White Wine")
+```
+
+
+```{r}
+# total sulfur dioxide
+plot_density_plot(wine_data, 'total sulfur dioxide')
+plot_boxplot(wine_data, 'total sulfur dioxide')
+plot_boxplot_quality(wine_data, 'total sulfur dioxide')
+```
+
+```{r}
+#performing normality check for red wine (total sulfur dioxide)
+normality_tester(red_wine, 'total sulfur dioxide', 'red','Red Wine')
+
+#performing normality check for white wine (total sulfur dioxide)
+normality_tester(white_wine, 'total sulfur dioxide', 'lightblue', "White Wine")
+```
+
+
+```{r}
+# density
+plot_density_plot(wine_data, 'density')
+plot_boxplot(wine_data, 'density')
+plot_boxplot_quality(wine_data, 'density')
+```
+
+```{r}
+#performing normality check for red wine (density)
+normality_tester(red_wine, 'density', 'red','Red Wine')
+
+#performing normality check for white wine (density)
+normality_tester(white_wine, 'density', 'lightblue', "White Wine")
+```
+
+
+```{r}
+# pH
+plot_density_plot(wine_data, 'pH')
+plot_boxplot(wine_data, 'pH')
+plot_boxplot_quality(wine_data, 'pH')
+```
+
+```{r}
+#performing normality check for red wine (pH)
+normality_tester(red_wine, 'pH', 'red','Red Wine')
+
+#performing normality check for white wine (pH)
+normality_tester(white_wine, 'pH', 'lightblue', "White Wine")
+```
+
+
+```{r}
+# sulphates
+plot_density_plot(wine_data, 'sulphates')
+plot_boxplot(wine_data, 'sulphates')
+plot_boxplot_quality(wine_data, 'sulphates')
+```
+```{r}
+#performing normality check for red wine (sulphates)
+normality_tester(red_wine, 'sulphates', 'red','Red Wine')
+
+#performing normality check for white wine (sulphates)
+normality_tester(white_wine, 'sulphates', 'lightblue', "White Wine")
+```
+
+
+```{r}
+# alcohol
+plot_density_plot(wine_data, 'alcohol')
+plot_boxplot(wine_data, 'alcohol')
+plot_boxplot_quality(wine_data, 'alcohol')
+
+```
+
+```{r}
+#performing normality check for red wine (alcohol)
+normality_tester(red_wine, 'alcohol', 'red','Red Wine')
+
+#performing normality check for white wine (alcohol)
+normality_tester(white_wine, 'alcohol', 'lightblue', "White Wine")
+```
+
+CORRELATION ANALYSIS
+
+First we split the data into their various categories i.e continuous, ordinal and nominal categorical
+Quality is ordinal categorical.
+wine_type is nominal categorical.
+The rest are continuous.
+
+WINE DATA (RED AND WHITE WINES): CORRELATION MATRIX - MULTIPLE CONTINUOUS VARIABLES
+```{r}
+#continuous columns in the wine_data data frame
+wine_data_continuous <- wine_data %>% 
+  select(-quality,-wine_type)
+
+# correlation matrix: Multiple continuous variables
+# as seen in the normality tests, all the continuous variables are non-normal so we use Spearman's correlation
+wine_data_continuous_cor_matrix <- round(cor(wine_data_continuous, method = "spearman"), digit=2)
+wine_data_continuous_cor_matrix
+```
+
+```{r}
+# Visualizing the continuous correlation matrix
+corrplot(wine_data_continuous_cor_matrix,
+         method = "number",
+         type = "upper",
+         title = "Corrplot for Continous Variables (Wine data)",
+         tl.col = "black",
+         number.cex = 0.6,
+         tl.cex = 0.6,
+         cl.cex = 0.6,
+         mar = c(1, 0, 2, 0))
+```
+RED WINE: CORRELATION MATRIX - MULTIPLE CONTINUOUS VARIABLES
+```{r}
+# correlation matrix: Multiple continuous variables
+red_wine_continuous <- red_wine %>% select(-quality,-wine_type)
+red_wine_continuous_cor_matrix <- round(cor(red_wine_continuous, method = "spearman"), digit=2)
+
+corrplot(red_wine_continuous_cor_matrix,
+         method = "number",
+         type = "upper",
+         title = "Corrplot for Continous Variables (Red Wine)",
+         tl.col = "red",
+         number.cex = 0.6,
+         tl.cex = 0.6,
+         cl.cex = 0.6,
+         mar = c(1, 0, 2, 0))
+```
+WHITE WINE: CORRELATION MATRIX - MULTIPLE CONTINUOUS VARIABLES
+```{r}
+# correlation matrix: Multiple continuous variables
+white_wine_continuous <- white_wine %>% select(-quality,-wine_type)
+white_wine_continuous_cor_matrix <- round(cor(white_wine_continuous, method = "spearman"), digit=2)
+
+corrplot(white_wine_continuous_cor_matrix,
+         method = "number",
+         type = "full",
+         title = "Corrplot for Continous Variables (White Wine)",
+         tl.col = "blue",
+         number.cex = 0.6,
+         tl.cex = 0.6,
+         cl.cex = 0.6,
+         mar = c(1, 0, 2, 0))
+```
+```{r}
+# Creating a copy of the wine_data df to introduce wine_type as numeric.
+wine_data_copy <- wine_data %>%
+  mutate(wine_type_numeric = ifelse(wine_type == "Red", 0, 1))
+```
+
+
+CORRELATION BETWEEN CONTINUOUS AND NOMINAL CATEGORICAL
+```{r}
+# Using Point-biserial correlation with wine type
+point_biserial_cor <- sapply(names(wine_data_continuous), function(var) {
+  cor.test(wine_data_copy[[var]], wine_data_copy$wine_type_numeric, method = "pearson")$estimate
+})
+
+# Converting to a data frame for better readability
+pb_cor_df <- data.frame(
+  Variable = names(wine_data_continuous),
+  pb_correlation = point_biserial_cor
+)
+print(pb_cor_df)
+```
+
+```{r}
+# Visualizing the point-biserial correlations between the continuous variables and wine type
+ggplot(pb_cor_df, aes(x = reorder(Variable, pb_correlation), 
+                                  y = pb_correlation, 
+                                  fill = pb_correlation)) +
+  geom_bar(stat = "identity") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) + 
+  labs(title = "Point-Biserial Correlation of Continuous Variables with Wine Type",
+       x = "Continuous Variables") +
+  theme_calc() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+CORREALTION BETWEEN CONTINUOUS AND ORDINAL CATEGORICAL VARAIBLES 
+```{r}
+# Spearman correlation of continuous variables with quality
+spearman_cor <- sapply(names(wine_data_continuous), function(var) {
+  cor.test(wine_data_copy[[var]], as.numeric(wine_data_copy$quality), method = "spearman")$estimate
+})
+
+# Converting results to a data frame
+spearman_cor_df <- data.frame(
+  Variable = names(wine_data_continuous),
+  spearman_correlation = spearman_cor
+)
+print(spearman_cor_df)
+```
+```{r}
+# Visualizing the spearman correlation between the continuous variables and quality
+ggplot(spearman_cor_df, aes(x = reorder(Variable, spearman_correlation), 
+                                  y = spearman_correlation, 
+                                  fill = spearman_correlation)) +
+  geom_bar(stat = "identity") +
+  scale_fill_gradient2(low = "green", mid = "white", high = "brown", midpoint = 0) + 
+  labs(title = "Spearman Correlation of Continuous Variables with quality",
+       x = "Continuous Variables") +
+  theme_calc() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+HYPOTHESIS TESTING.
+Since all the continuous variables have non-normal distributions,
+We will perform 3 transformations to try to make them approximately normal
+(log, sqrt, and cuberoot)
+
+```{r}
+# continuous columns in red and white wine data frames
+columns_red <- names(red_wine_continuous)
+columns_white <- names(white_wine_continuous)
+```
+
+
+```{r}
+# function to log transform and perform Shapiro-Wilk test
+log_shapiro <- function(data, columns) {
+  p_values <- list()
+  for (col in columns) {
+      # log transforming
+      log_transformed <- log(data[[col]])
+      
+      # Shapiro-Wilk test
+      shapiro_test <- shapiro.test(log_transformed)
+      p_values[[col]] <- shapiro_test$p.value
+  }
+  return(unlist(p_values))
+}
+```
+
+```{r}
+# function to sqrt transform and perform Shapiro-Wilk test
+sqrt_shapiro <- function(data, columns) {
+  p_values <- list()
+  for (col in columns) {
+      # sqrt transforming
+      sqrt_transformed <- sqrt(data[[col]])
+      
+      # Shapiro-Wilk test
+      shapiro_test <- shapiro.test(sqrt_transformed)
+      p_values[[col]] <- shapiro_test$p.value
+  }
+  return(unlist(p_values))
+}
+```
+
+```{r}
+# function to cuberoot transform and perform Shapiro-Wilk test
+cuberoot_shapiro <- function(data, columns) {
+  p_values <- list()
+  for (col in columns) {
+      # cuberoot transforming
+      sqrt_transformed <- (data[[col]])^(1/3)
+      
+      # Shapiro-Wilk test
+      shapiro_test <- shapiro.test(sqrt_transformed)
+      p_values[[col]] <- shapiro_test$p.value
+  }
+  return(unlist(p_values))
+}
+```
+
+
+P-values for red wine after transforming the features
+```{r}
+# Dataframe showing the P-Values of the transformed variables in the red wine
+red_wine_shapiro_test <- data.frame(log= log_shapiro(red_wine,columns_red),
+                                    sqrt= sqrt_shapiro(red_wine,columns_red),
+                                    cuberoot = cuberoot_shapiro(red_wine,columns_red))
+red_wine_shapiro_test
+```
+P-values for white wine after transforming the features
+```{r}
+# Dataframe showing the P-Values of the transformed variables in the white wine
+white_wine_shapiro_test <- data.frame(log= log_shapiro(white_wine,columns_white),
+                                    sqrt= sqrt_shapiro(white_wine,columns_white),
+                                    cuberoot = cuberoot_shapiro(white_wine,columns_white))
+white_wine_shapiro_test
+```
+Since all the transformed variables failed to be normal based on  the Shapiro_Wilk test.
+QQ plots might give us approximate normality.
+
+```{r}
+# function to plot the log transformed QQ plot
+log_qqplot <- function(data, column_name, color, wine_type) {
+  qqplot <- ggplot(data, aes(sample = log(.data[[column_name]]))) +
+    stat_qq(color = color) +
+    stat_qq_line(color = "black") +
+    labs(
+      title = paste("QQ Plot for log", column_name, "(", wine_type, ")"),
+      x = "Theoretical",
+      y = "Sample"
+    ) +
+    theme_calc()+ 
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+  print(qqplot)  
+}
+```
+
+```{r}
+# function to plot the sqrt transformed QQ plot
+sqrt_qqplot <- function(data, column_name, color, wine_type) {
+  qqplot <- ggplot(data, aes(sample = sqrt(.data[[column_name]]))) +
+    stat_qq(color = color) +
+    stat_qq_line(color = "black") +
+    labs(
+      title = paste("QQ Plot for sqrt", column_name, "(", wine_type, ")"),
+      x = "Theoretical",
+      y = "Sample"
+    ) +
+    theme_calc()+ 
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+  print(qqplot)  
+}
+```
+
+```{r}
+# function to plot the cuberoot transformed QQ plot
+cuberoot_qqplot <- function(data, column_name, color, wine_type) {
+  qqplot <- ggplot(data, aes(sample = (.data[[column_name]])^(1/3))) +
+    stat_qq(color = color) +
+    stat_qq_line(color = "black") +
+    labs(
+      title = paste("QQ Plot for cuberoot", column_name, "(", wine_type, ")"),
+      x = "Theoretical",
+      y = "Sample"
+    ) +
+    theme_calc()+ 
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+  print(qqplot)  
+}
+```
+
+LOG TRANSFORMED QQPLOT FOR RED WINE
+```{r}
+# Plotting the log transformed QQ plots for all the variables in Red wine
+for (i in names(red_wine_continuous)) {
+  log_qqplot(red_wine, i, 'red', 'red wine')
+}
+```
+
+SQRT TRANSFORMED QQPLOT FOR RED WINE
+```{r}
+# Plotting the sqrt transformed QQ plots for all the variables in Red wine
+for (i in names(red_wine_continuous)) {
+  sqrt_qqplot(red_wine, i, 'red', 'red wine')
+}
+```
+
+CUBEROOT TRANSFORMED QQPLOT FOR RED WINE
+```{r}
+# Plotting the cuberoot transformed QQ plots for all the variables in Red wine
+for (i in names(red_wine_continuous)) {
+  cuberoot_qqplot(red_wine, i, 'red', 'red wine')
+}
+```
+
+LOG TRANSFORMED QQPLOT FOR WHITE WINE
+```{r}
+# Plotting the log transformed QQ plots for all the variables in White wine
+for (i in names(white_wine_continuous)) {
+  log_qqplot(white_wine, i, 'lightblue', 'white wine')
+}
+```
+SQRT TRANSFORMED QQPLOT FOR WHITE WINE
+```{r}
+# Plotting the sqrt transformed QQ plots for all the variables in White wine
+for (i in names(white_wine_continuous)) {
+  sqrt_qqplot(white_wine, i, 'lightblue', 'white wine')
+}
+```
+
+
+CUBEROOT TRANSFORMED QQPLOT FOR WHITE WINE
+```{r}
+# Plotting the cuberoot transformed QQ plots for all the variables in White wine
+for (i in names(white_wine_continuous)) {
+  cuberoot_qqplot(white_wine, i, 'lightblue', 'white wine')
+}
+```
+
+
+Hypotheses Testing 1
+
+Tests if there is an association between the wine type and quality
+
+Since wine_type is nominal categorical and quality is ordinal
+
+Chi-Square Test of Independence
+
+Hypotheses:
+Null Hypothesis (H₀):There is no association between wine type and quality
+Alternative Hypothesis (H₁): Wine type and wine quality are associated
+```{r}
+# Creating quality type to reduce the perform Chi-squared test
+wine_data_copy <- wine_data_copy %>%
+  mutate(quality_type = case_when(
+    quality %in% c(3, 4) ~ "Low",
+    quality %in% c(5,6) ~ "Medium",
+    quality %in% c(7,8, 9) ~ "High"
+  ))
+wine_data_copy$quality_type  <- factor(wine_data_copy$quality_type , 
+                                   levels = c("Low", "Medium", "High"), 
+                                   ordered = TRUE)
+table(wine_data_copy$wine_type,wine_data_copy$quality_type)
+```
+
+```{r}
+# Plotting number of wines by Quality and type
+ggplot(wine_data_copy,aes(x = quality_type, fill = wine_type)) +
+  geom_bar() +
+  labs(title = "Number of Wines by Quality by Type") +
+  scale_fill_manual(values = c("Red" = "red", "White" = "lightblue")) +  theme_calc()
+```
+
+
+```{r}
+# Chi-squared test of independence.
+chisq_test <- chisq.test(wine_data_copy$wine_type, wine_data_copy$quality_type)
+chisq_test
+chisq_test$residuals
+```
+Since the p-value is much less than 0.05, we reject the null hypothesis. 
+This means there is a statistically significant association between wine_type and quality_type.
+
+High-quality wines: Fewer for red wine, more for white wine.
+Medium-quality wines: Slightly more for red wine, slightly fewer for white wine.
+
+
+HYPOTHESIS TEST 2.
+
+Testing pH vs Wine Type (Two Sample T-Test)
+
+Null Hypothesis (H₀) : There is no significant difference in the mean pH between the two wine types.
+Alternative Hypothesis (H₁):There is significant difference in the mean pH between the two wine types
+
+```{r}
+# Visualizing the distribution of log_pH based on wine type.
+wine_data %>% 
+  mutate(log_pH = log(pH)) %>% 
+  ggplot(aes(x = wine_type, y = log_pH, fill = wine_type)) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot of log_pH by Wine Type")) +
+    scale_fill_manual(values = c("Red" = "red", "White" = "lightblue")) +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+
+wine_data %>% 
+  mutate(log_pH = log(pH)) %>% 
+  ggplot(aes(x = log_pH, fill = wine_type)) +
+  geom_density(alpha = 0.7) +
+    labs(title = paste("Density plot of log_pH by Wine Type")) +
+    scale_fill_manual(values = c("Red" = "red", "White" = "lightblue")) +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+```
+
+
+ASSUMPTIONS
+
+Normality check
+```{r}
+# plotting histograms to check normality distribution of log_pH
+red_wine %>%
+  mutate(log_pH = log(pH)) %>% 
+  ggplot(aes(x = log_pH)) +
+    geom_histogram(alpha = 0.7, bins =10,fill = "red") +
+    labs(title ="Histogram of log_pH (Red Wine)") +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+
+white_wine %>%
+  mutate(log_pH = log(pH)) %>% 
+  ggplot(aes(x = log_pH)) +
+    geom_histogram(alpha = 0.7, bins =10, fill = "lightblue") +
+    labs(title ="Histogram of log_pH (White Wine)") +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+```
+
+```{r}
+# Shapiro-Wilk test for normality
+wine_data %>%
+  group_by(wine_type) %>%
+  mutate(log_pH = log(pH)) %>% 
+  summarise(p_value = shapiro.test(log_pH)$p.value)
+```
+P<0.05, w ereject null hyposthesis of normality
+
+```{r}
+# QQ plot check for normality
+red_wine %>%
+  mutate(log_pH = log(pH)) %>%
+  ggplot(aes(sample = log_pH)) +
+    stat_qq(color ='red') +
+    stat_qq_line(color = "black") +
+    labs(
+      title = paste("QQ Plot for log_pH of red wine"),
+      x = "Theoretical",
+      y = "Sample") +
+    theme_calc()+ 
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+
+white_wine %>%
+  mutate(log_pH = log(pH)) %>%
+  ggplot(aes(sample = log_pH)) +
+    stat_qq(color = 'lightblue') +
+    stat_qq_line(color = "black") +
+    labs(
+      title = paste("QQ Plot for log_pH of white wine"),
+      x = "Theoretical",
+      y = "Sample") +
+    theme_calc()+ 
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+```
+QQ plots appear approximately normal. We can carry on with a parametric test.
+
+```{r}
+# Test for homogeneity of variance
+wine_data %>% 
+  mutate(log_pH = log(pH)) %>% 
+  bartlett.test(log_pH ~ wine_type, data = .)
+```
+P>0,05, fail to reject null hypothesis, variance is equal.
+
+```{r}
+# Two sample t-test (two tailed)
+wine_data %>% 
+  mutate(log_pH = log(pH)) %>% 
+  t.test(log_pH ~ wine_type, data = ., var.equal = TRUE)
+```
+In this case the p-value is less than 0.05, therefore the Null Hypothesis is rejected and Alternative Hypothesis is accepted.
+
+
+
+Hypothesis Test 3
+
+chlorides vs. Wine Type
+Hypotheses:
+Null Hypothesis (H₀) The distribution of chlorides is identical in red and white wines.
+Alternative Hypothesis (H₁):The distribution of chlorides is not identical in red and white wines.
+
+```{r}
+#normality checks
+# Red wine
+shapiro.test(red_wine$chlorides)
+# White wine
+shapiro.test(white_wine$chlorides)
+```
+
+p<0.05: Not normally distributed → Mann-Whitney U Test.
+
+Assumptions for Mann-Whitney U Test
+Checking for same shape
+```{r}
+#plotting the distribution of chlorides for red  wine
+  ggplot(red_wine, aes(x = chlorides)) +
+    geom_histogram(alpha = 0.7, bins =10,fill = "red") +
+    labs(title ="Histogram of chlorides (Red Wine)") +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+#plotting the distribution of chlorides for white wine
+  ggplot(white_wine, aes(x = chlorides)) +
+    geom_histogram(alpha = 0.7, bins =10, fill = "lightblue") +
+    labs(title ="Histogram of chlorides (White Wine)") +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+```
+
+```{r}
+# Mann-Whitney U Test / Wilcox rank sum test
+wilcox.test(chlorides ~ wine_type,data = wine_data)
+```
+p<0.05: we reject Null Hypothesis (H₀):The chlorides distributions differ significantly between the two wine types
+
+Hypothesis Test 4
+Hypotheses:
+Null Hypothesis (H₀): Median Alcohol level is equal across all quality type
+Alternative Hypothesis (H₁): Median Alcohol is not equal across all quality type
+
+
+```{r}
+# Normality check for alcohol for all quality types
+byf.shapiro(alcohol ~ quality_type, data = wine_data_copy)
+```
+P<0.05, Reject null hypothesis. Not normally distributed.
+
+```{r}
+# Test for homogeneity of variance
+bartlett.test(alcohol ~ quality_type, data = wine_data_copy)
+```
+P > 0.05, Accept Null hypothesis.
+
+```{r}
+# Distribution of alcohol in across quality type
+ggplot(data=wine_data_copy, aes(x = quality_type, y = alcohol, fill=quality_type)) +
+  geom_boxplot() +
+  labs(title = paste("Alcohol level for each Quality Type")) +
+  scale_fill_manual(values = c("Low" = "lightgreen", "Medium" = "green", "High" = "darkgreen")) +
+  theme_calc() +
+  theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+```
+
+
+```{r}
+#plotting the distribution of Alcohol for low quality
+wine_data_copy %>% 
+  filter(quality_type == 'Low') %>% 
+  ggplot(aes(x = alcohol)) +
+    geom_density(fill = 'lightgreen') +
+    labs(title ="Desnity Plot of Alcohol for Low Quality") +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+```
+
+```{r}
+#plotting the distribution of Alcohol for medium quality
+wine_data_copy %>% 
+  filter(quality_type == 'Medium') %>% 
+  ggplot(aes(x = alcohol)) +
+    geom_density(fill = 'green') +
+    labs(title ="Desnity Plot of Alcohol for Medium Quality") +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+```
+
+```{r}
+#plotting the distribution of Alcohol for high quality
+wine_data_copy %>% 
+  filter(quality_type == 'High') %>% 
+  ggplot(aes(x = alcohol)) +
+    geom_density(fill = 'darkgreen') +
+    labs(title ="Desnity Plot of Alcohol for High Quality") +
+    theme_calc() +
+    theme(plot.title = element_text(size = 14, margin = margin(b = 10)))
+```
+
+```{r}
+# Kruskal-Wallace test for non parametric models.
+kruskal.test(alcohol ~ quality_type, data = wine_data_copy)
+```
+p < 0.05, We reject Null hypothesis and carry out Dunes test, to check which is actually different.
+
+POST-HOC TEST
+```{r}
+# Dunns test 
+dunnTest(wine_data_copy$alcohol, wine_data_copy$quality_type, method = 'bonferroni')
+```
+
+
+
+Regression
+
+
+Model 1
+Question: Can wine type and physiochemical properties be used to predict wine quality.
+Logistic Regression 1
+
+```{r}
+# preparing data for logistic regression
+# changing the quality to binary for logistic regression
+wine_data_logistic <- wine_data %>%
+  mutate(quality_binary = case_when(
+    quality %in% c(3, 4,5,6) ~ 0,
+    quality %in% c(7,8, 9) ~ 1
+  ))
+head(wine_data_logistic)
+```
+Backward Step wise
+```{r}
+# Quailty prediction model 1
+quality_prediction_1 <- glm(
+  quality_binary ~ wine_type + `fixed acidity` + `volatile acidity` +
+  `citric acid`+ `residual sugar` + chlorides+ `free sulfur dioxide` +
+  `total sulfur dioxide`+ sulphates + density + pH + alcohol,
+  data = wine_data_logistic,family = "binomial"
+)
+
+summary(quality_prediction_1)
+```
+
+```{r}
+# Quality prediction model 2
+quality_prediction_2 <- glm(
+  quality_binary ~ wine_type + `fixed acidity` + `volatile acidity` +
+  `residual sugar` + chlorides+ `free sulfur dioxide` +
+  `total sulfur dioxide`+ sulphates + density + pH + alcohol,
+  data = wine_data_logistic,family = "binomial"
+)
+
+summary(quality_prediction_2)
+```
+```{r}
+# Important features for predicting quality
+quality_feature_importance <- varImp(quality_prediction_2, scale=False)
+quality_feature_importance <- quality_feature_importance %>% arrange(desc(Overall))
+quality_feature_importance
+```
+Most important features when predicting quality are pH, volatile acidity,sulphates,residual sugar,fixed acidity
+density,alcohol.
+```{r}
+# Using only the most important features
+quality_prediction_3 <- glm(
+  quality_binary ~ `fixed acidity` + `volatile acidity` +`residual sugar`+
+  sulphates + density + pH + alcohol,
+  data = wine_data_logistic,family = "binomial"
+)
+
+summary(quality_prediction_3)
+```
+
+```{r}
+# Multicolinearity check
+vif(quality_prediction_2)
+```
+
+```{r}
+# Quality prediction model 4
+quality_prediction_4 <- glm(
+  quality_binary ~ `volatile acidity` + wine_type +
+  `residual sugar` + chlorides+ `free sulfur dioxide`+ sulphates + pH + alcohol,
+  data = wine_data_logistic,family = "binomial"
+)
+
+summary(quality_prediction_4)
+```
+```{r}
+# Multicollinearity check
+vif(quality_prediction_4)
+```
+
+Linearity Check
+```{r}
+# Calculating pi
+probs_quality <- predict(quality_prediction_4, data=wine_data_logistic,type="response")
+wine_data_logistic$probs_quality <- probs_quality
+```
+
+```{r}
+# Calculating logit(pi)
+wine_data_logistic$logits_quality <- log(probs_quality/(1-probs_quality))
+```
+
+
+```{r}
+# scatter plot for linearity check
+pairs(wine_data_logistic[,c(16,2,9,11)], lower.panel = NULL,
+      upper.panel = panel.smooth, pch = 19,cex = 0.2)
+```
+Logits appears to have a linear relationship with volatile acidity, pH and alcohol.
+
+```{r}
+# Cooks disatnce test for influential values
+plot(quality_prediction_4, which = 4, id.n = 3)
+```
+It is worth noting that observation 246,935, and 5187, might have outliers.
+
+
+Model 2
+Question: Can wine quality and physiochemical properties be used to predict wine type?
+
+Logistic Regression Model 2
+
+```{r}
+# data for prediction (removing columns observed with substantial outliers)
+wine_data_logistic_2 <- wine_data %>%
+  mutate(wine_type_numeric = ifelse(wine_type == "Red", 0, 1)) %>% 
+  slice(-c(3654,919,929))
+```
+
+
+Backward Step wise
+```{r}
+# First Prediction model for wine type
+type_prediction_1 <- glm(
+  wine_type_numeric ~ quality + `fixed acidity` + `volatile acidity` +
+  `citric acid`+ `residual sugar` + chlorides+ `free sulfur dioxide` +
+  `total sulfur dioxide`+ sulphates + density + pH + alcohol,
+  data = wine_data_logistic_2,family = "binomial"
+)
+
+summary(type_prediction_1)
+```
+
+```{r}
+# Second prediction model for wine type.
+type_prediction_2 <- glm(
+  wine_type_numeric ~ `volatile acidity` +
+  `residual sugar`+ `total sulfur dioxide`+ density + alcohol,
+  data = wine_data_logistic_2,family = "binomial"
+)
+
+summary(type_prediction_2)
+```
+
+```{r}
+# Most important variables when predicting wine type
+type_feature_importance <- varImp(type_prediction_2, scale=False)
+type_feature_importance <- type_feature_importance %>% arrange(desc(Overall))
+type_feature_importance
+```
+Most important features when predicting wine type are density, total sulfur dioxide, residual sugar, volatile acidity and alcohol
+
+```{r}
+# Multicolinearity check
+vif(type_prediction_2)
+```
+
+Linearity check
+```{r}
+# Calculating pi values
+probs_type <- predict(type_prediction_2, data=wine_data_logistic_2,type="response")
+wine_data_logistic_2$probs_type <- probs_type
+```
+
+```{r}
+# calculating (logit(pi))
+wine_data_logistic_2$logits_type <- log(probs_type/(1-probs_type))
+```
+
+
+```{r}
+# Scatter plot to confirm linearity
+pairs(wine_data_logistic_2[,c(16,8,4,11)], lower.panel = NULL,
+      upper.panel = panel.smooth, pch = 19,cex = 0.2)
+```
+Logits has an approximately linear relationship with density,residual sugar and alcohol.
+
+```{r}
+# checking for influential values.
+plot(type_prediction_2, which = 4, id.n = 3)
+```
+Noticed that at observation 920,2752 and 4516, have some influential values worth looking out for.
+
+```{r}
+# Regression curve to predict wine type.
+ggplot(wine_data_logistic_2, aes(x=`volatile acidity` +
+  `residual sugar`+ `total sulfur dioxide`+ density + alcohol,
+  y=wine_type_numeric)) + 
+geom_point() + 
+stat_smooth(method="glm", color="lightgreen", se=FALSE, 
+method.args = list(family=binomial))
+
+```
+
+
+
+
+
+MODEL 3
+Question: can the other physiochemical properties be used to predict the density of wines?
+Multiple Linear Regression model.
+
+```{r}
+# Visualizing the relationship between density and other properties
+corrplot(wine_data_continuous_cor_matrix,
+         method = "circle",
+         type = "upper",
+         title = "Relationship Between the Physiochemical Properties",
+         tl.col = "black",
+         number.cex = 0.6,
+         tl.cex = 0.6,
+         cl.cex = 0.6,
+         mar = c(1, 0, 2, 0))
+```
+It seems like Density has a good correlation with alcohol, fixed acidity, volatile acidity and residual sugar.
+
+```{r}
+# removing outliers using Z score
+compute_z_scores <- function(data) {
+  as.data.frame(scale(data))}
+```
+
+```{r}
+# Removing outliers
+z_scores <- compute_z_scores(wine_data_continuous)
+outlier_rows <- apply(z_scores, 1, function(row) any(abs(row) > 3))
+wine_no_outliers <- wine_data_continuous[!outlier_rows, ]
+```
+
+```{r}
+#Multiple Linear regression model
+density_prediction <- lm(density ~ alcohol +`residual sugar` +
+                        `fixed acidity`+ `volatile acidity`,
+                         wine_no_outliers)
+summary(density_prediction)
+```
+
+
+```{r}
+# Linearity between the IVs and DV
+pairs(wine_no_outliers[,c(8,1,4,11)], lower.panel = NULL,
+      upper.panel = panel.smooth,pch = 19,cex = 0.2)
+```
+
+```{r}
+# Linearity between the IVs and DV
+crPlots(density_prediction)
+```
+All the independent variables have a linear relationship with density (Dependent variable)
+
+```{r}
+# Residual Independence
+plot(density_prediction,1)
+```
+The correlation between the residuals is approximately 0, therefore theresiduals are independent.
+
+```{r}
+# Normality of residuals
+plot(density_prediction,2)
+```
+The residuals appear approximately normally distributed, with some deviations at the tail
+
+```{r}
+# Homoscedacity test
+plot(density_prediction,3)
+```
+There is no clear pattern among residuals, they appear randomly scattered with equal variablilty.
+
+```{r}
+# Multicollinearity
+vif(density_prediction)
+```
+The VIF of all the IVs are all less than 2, which indicates little to no correlation between the IVs and DV.
+
+
